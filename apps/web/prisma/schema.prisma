@@ -1,0 +1,235 @@
+// ADCC database schema. Change only via `pnpm db:migrate` (see DEVELOPMENT.md).
+// Conventions: UUIDv7 ids, timestamptz, snake_case table names.
+// Parent deletes are Restrict wherever user data hangs off them: archive instead of delete.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TaskStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MilestoneStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AgentSource {
+  CLAUDE_CODE
+  CODEX
+}
+
+model Project {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  name        String    @db.VarChar(200)
+  slug        String    @unique @db.VarChar(100)
+  description String?
+  /// Absolute Windows path of the working folder; used to map agent sessions to projects.
+  localPath   String?   @unique
+  archivedAt  DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+
+  repositories   Repository[]
+  milestones     Milestone[]
+  tasks          Task[]
+  agentSessions  AgentSession[]
+  activityEvents ActivityEvent[]
+
+  @@index([archivedAt])
+  @@map("projects")
+}
+
+model Repository {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  projectId     String?   @db.Uuid
+  /// GitHub owner/name, stored lowercase (GitHub names are case-insensitive).
+  owner         String    @db.VarChar(100)
+  name          String    @db.VarChar(100)
+  /// GitHub's numeric repo id; null until first sync.
+  githubId      BigInt?   @unique
+  defaultBranch String?   @db.VarChar(255)
+  lastSyncedAt  DateTime? @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  activityEvents ActivityEvent[]
+
+  @@unique([owner, name])
+  @@index([projectId])
+  @@map("repositories")
+}
+
+model Milestone {
+  id          String          @id @default(uuid(7)) @db.Uuid
+  projectId   String          @db.Uuid
+  title       String          @db.VarChar(200)
+  description String?
+  status      MilestoneStatus @default(PLANNED)
+  dueDate     DateTime?       @db.Date
+  completedAt DateTime?       @db.Timestamptz(3)
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime        @updatedAt @db.Timestamptz(3)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  tasks   Task[]
+
+  @@unique([projectId, title])
+  @@index([projectId, status])
+  @@map("milestones")
+}
+
+model Task {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  projectId   String       @db.Uuid
+  /// Must belong to the same project; enforced in the task service.
+  milestoneId String?      @db.Uuid
+  title       String       @db.VarChar(300)
+  description String?
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?    @db.Date
+  completedAt DateTime?    @db.Timestamptz(3)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+
+  project        Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  milestone      Milestone?      @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  activityEvents ActivityEvent[]
+
+  @@index([projectId, status])
+  @@index([milestoneId])
+  @@map("tasks")
+}
+
+/// One Claude Code or Codex session, read from its local session file (ADR-004).
+model AgentSession {
+  id                 String      @id @default(uuid(7)) @db.Uuid
+  source             AgentSource
+  /// Session id as written by the agent tool itself.
+  externalId         String      @db.VarChar(200)
+  projectId          String?     @db.Uuid
+  cwd                String?
+  gitBranch          String?     @db.VarChar(255)
+  title              String?
+  sourcePath         String
+  startedAt          DateTime?   @db.Timestamptz(3)
+  lastEventAt        DateTime?   @db.Timestamptz(3)
+  endedAt            DateTime?   @db.Timestamptz(3)
+  /// Records in the source file that failed validation and were not ingested.
+  skippedRecordCount Int         @default(0)
+  createdAt          DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime    @updatedAt @db.Timestamptz(3)
+
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  events         AgentEvent[]
+  usageRecords   UsageRecord[]
+  activityEvents ActivityEvent[]
+
+  @@unique([source, externalId])
+  @@index([projectId, startedAt])
+  @@index([lastEventAt])
+  @@map("agent_sessions")
+}
+
+/// One record from a session file. (sessionId, externalId) makes re-ingestion idempotent.
+model AgentEvent {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  sessionId  String   @db.Uuid
+  /// Record id from the source file, or a parser-assigned stable key (e.g. "line:42").
+  externalId String   @db.VarChar(200)
+  type       String   @db.VarChar(100)
+  role       String?  @db.VarChar(50)
+  occurredAt DateTime @db.Timestamptz(3)
+  summary    String?
+  payload    Json
+  sourceLine Int
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  session AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  usage   UsageRecord?
+
+  @@unique([sessionId, externalId])
+  @@index([sessionId, occurredAt])
+  @@map("agent_events")
+}
+
+/// Token counts reported by the agent tool for one event. Cost is computed, never stored (ADR-004).
+model UsageRecord {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  sessionId        String   @db.Uuid
+  eventId          String   @unique @db.Uuid
+  model            String   @db.VarChar(200)
+  occurredAt       DateTime @db.Timestamptz(3)
+  inputTokens      Int
+  outputTokens     Int
+  cacheReadTokens  Int      @default(0)
+  cacheWriteTokens Int      @default(0)
+  reasoningTokens  Int      @default(0)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  session AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  event   AgentEvent   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([occurredAt])
+  @@index([model, occurredAt])
+  @@map("usage_records")
+}
+
+/// Unified timeline entry. Derived from real events only; dedupeKey stops double inserts.
+model ActivityEvent {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  type           String   @db.VarChar(100)
+  occurredAt     DateTime @db.Timestamptz(3)
+  title          String   @db.VarChar(500)
+  description    String?
+  /// e.g. "github:commit:<sha>"; null for events that can't repeat.
+  dedupeKey      String?  @unique @db.VarChar(300)
+  metadata       Json?
+  projectId      String?  @db.Uuid
+  repositoryId   String?  @db.Uuid
+  taskId         String?  @db.Uuid
+  agentSessionId String?  @db.Uuid
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  repository   Repository?   @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  task         Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  agentSession AgentSession? @relation(fields: [agentSessionId], references: [id], onDelete: SetNull)
+
+  @@index([occurredAt])
+  @@index([projectId, occurredAt])
+  @@index([type, occurredAt])
+  @@map("activity_events")
+}
+
+/// Key/value app settings. Validate each key's value with a Zod schema in src/domain before writing.
+model ApplicationSetting {
+  key       String   @id @db.VarChar(100)
+  value     Json
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("application_settings")
+}

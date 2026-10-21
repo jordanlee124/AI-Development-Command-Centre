@@ -1,0 +1,26 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# dependencies
+node_modules/
+
+# build output
+.next/
+dist/
+out/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+next-env.d.ts
+
+# generated Prisma client (rebuilt on install)
+apps/web/src/generated/
+
+# misc
+*.log
+.DS_Store
+Thumbs.db

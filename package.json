@@ -1,0 +1,27 @@
+{
+  "name": "adcc",
+  "private": true,
+  "packageManager": "pnpm@10.34.7",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm -r --if-present build",
+    "lint": "prettier --check . && pnpm -r --if-present lint",
+    "format": "prettier --write .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm --filter web test:e2e",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter web db:migrate",
+    "db:deploy": "pnpm --filter web db:deploy",
+    "db:status": "pnpm --filter web db:status",
+    "db:generate": "pnpm --filter web db:generate",
+    "db:studio": "pnpm --filter web db:studio"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}

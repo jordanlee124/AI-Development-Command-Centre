@@ -1,0 +1,22 @@
+name: adcc
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # Supplies POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB.
+    env_file: apps/web/.env
+    ports:
+      # Loopback only (CLAUDE.md rule 7). Uncommon host port so we never hit another local Postgres.
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - adcc-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  adcc-db:
+    name: adcc-db
