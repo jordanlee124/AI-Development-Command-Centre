@@ -1,0 +1,50 @@
+[
+  {
+    "base": { "ref": "master" },
+    "closed_at": null,
+    "created_at": "2026-10-20T19:14:36Z",
+    "draft": false,
+    "head": { "ref": "master" },
+    "html_url": "https://github.com/octocat/Hello-World/pull/11592",
+    "merged_at": null,
+    "number": 11592,
+    "requested_reviewers": [],
+    "requested_teams": [],
+    "state": "open",
+    "title": "Create my_file.txt",
+    "updated_at": "2026-10-21T21:47:26Z",
+    "user": { "login": "katakovalevskaa484-rgb" }
+  },
+  {
+    "base": { "ref": "master" },
+    "closed_at": "2026-10-21T16:59:47Z",
+    "created_at": "2026-10-21T16:59:01Z",
+    "draft": false,
+    "head": { "ref": "patch-1" },
+    "html_url": "https://github.com/octocat/Hello-World/pull/11594",
+    "merged_at": null,
+    "number": 11594,
+    "requested_reviewers": [],
+    "requested_teams": [],
+    "state": "closed",
+    "title": "Hermes agent chain test (safe to close)",
+    "updated_at": "2026-10-21T16:59:47Z",
+    "user": { "login": "linlunson" }
+  },
+  {
+    "base": { "ref": "master" },
+    "closed_at": null,
+    "created_at": "2026-10-20T19:21:23Z",
+    "draft": false,
+    "head": { "ref": "my-new-file" },
+    "html_url": "https://github.com/octocat/Hello-World/pull/11593",
+    "merged_at": null,
+    "number": 11593,
+    "requested_reviewers": [],
+    "requested_teams": [],
+    "state": "open",
+    "title": "Добавлен файл viola.txt",
+    "updated_at": "2026-10-20T23:30:12Z",
+    "user": { "login": "Viola181818" }
+  }
+]

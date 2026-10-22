@@ -11,6 +11,9 @@ export function getPrisma(): PrismaClient {
     const adapter = new PrismaPg({
       connectionString: getEnv().DATABASE_URL,
       connectionTimeoutMillis: 3000,
+      // The adapter drops the UTC offset when parsing timestamptz, so a non-UTC session
+      // (e.g. a server using the host's zone) would shift every timestamp. Pin UTC.
+      options: "-c TimeZone=UTC",
     });
     globalForPrisma.prisma = new PrismaClient({ adapter });
   }

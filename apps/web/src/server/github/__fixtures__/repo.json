@@ -1,0 +1,13 @@
+{
+  "archived": false,
+  "default_branch": "master",
+  "description": "My first repository on GitHub!",
+  "full_name": "octocat/Hello-World",
+  "has_issues": true,
+  "html_url": "https://github.com/octocat/Hello-World",
+  "id": 1296269,
+  "name": "Hello-World",
+  "owner": { "login": "octocat" },
+  "private": false,
+  "pushed_at": "2024-08-20T23:54:42Z"
+}
