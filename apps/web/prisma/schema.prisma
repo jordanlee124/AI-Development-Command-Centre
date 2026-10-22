@@ -1,6 +1,7 @@
 // ADCC database schema. Change only via `pnpm db:migrate` (see DEVELOPMENT.md).
 // Conventions: UUIDv7 ids, timestamptz, snake_case table names.
-// Parent deletes are Restrict wherever user data hangs off them: archive instead of delete.
+// Parent deletes are Restrict wherever user data hangs off them, so a stray delete fails loudly.
+// Projects are archived first; deleting one is an explicit, confirmed project-service action.
 
 generator client {
   provider = "prisma-client"
@@ -15,7 +16,7 @@ enum TaskStatus {
   BACKLOG
   TODO
   IN_PROGRESS
-  BLOCKED
+  IN_REVIEW
   DONE
   CANCELLED
 }
@@ -25,6 +26,13 @@ enum TaskPriority {
   MEDIUM
   HIGH
   URGENT
+}
+
+enum ProjectStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
 }
 
 enum MilestoneStatus {
@@ -40,15 +48,16 @@ enum AgentSource {
 }
 
 model Project {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  name        String    @db.VarChar(200)
-  slug        String    @unique @db.VarChar(100)
+  id          String        @id @default(uuid(7)) @db.Uuid
+  name        String        @db.VarChar(200)
+  slug        String        @unique @db.VarChar(100)
   description String?
+  status      ProjectStatus @default(ACTIVE)
   /// Absolute Windows path of the working folder; used to map agent sessions to projects.
-  localPath   String?   @unique
-  archivedAt  DateTime? @db.Timestamptz(3)
-  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  localPath   String?       @unique
+  archivedAt  DateTime?     @db.Timestamptz(3)
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
 
   repositories   Repository[]
   milestones     Milestone[]
@@ -61,24 +70,146 @@ model Project {
 }
 
 model Repository {
-  id            String    @id @default(uuid(7)) @db.Uuid
-  projectId     String?   @db.Uuid
+  id                String    @id @default(uuid(7)) @db.Uuid
+  projectId         String?   @db.Uuid
   /// GitHub owner/name, stored lowercase (GitHub names are case-insensitive).
-  owner         String    @db.VarChar(100)
-  name          String    @db.VarChar(100)
+  owner             String    @db.VarChar(100)
+  name              String    @db.VarChar(100)
   /// GitHub's numeric repo id; null until first sync.
-  githubId      BigInt?   @unique
-  defaultBranch String?   @db.VarChar(255)
-  lastSyncedAt  DateTime? @db.Timestamptz(3)
-  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime  @updatedAt @db.Timestamptz(3)
+  githubId          BigInt?   @unique
+  defaultBranch     String?   @db.VarChar(255)
+  description       String?
+  htmlUrl           String?   @db.VarChar(500)
+  isPrivate         Boolean?
+  /// Last successful sync. The GitHub tables below hold what that sync saw.
+  lastSyncedAt      DateTime? @db.Timestamptz(3)
+  /// Last attempt, successful or not; drives background sync spacing.
+  lastSyncAttemptAt DateTime? @db.Timestamptz(3)
+  /// Error from the last attempt; null once a sync succeeds.
+  lastSyncError     String?
+  /// Failed attempts since the last success; background sync backs off on it.
+  syncFailures      Int       @default(0)
+  createdAt         DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @db.Timestamptz(3)
 
-  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  project        Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   activityEvents ActivityEvent[]
+  branches       GitHubBranch[]
+  commits        GitHubCommit[]
+  pullRequests   GitHubPullRequest[]
+  issues         GitHubIssue[]
+  workflowRuns   GitHubWorkflowRun[]
 
   @@unique([owner, name])
   @@index([projectId])
   @@map("repositories")
+}
+
+// GitHub cache (ADR-015): read-only copies from the last successful sync, replaced whole on
+// each sync. Not user data; values from GitHub are varchar, not enums (ADR-008).
+
+model GitHubBranch {
+  repositoryId String  @db.Uuid
+  name         String  @db.VarChar(255)
+  headSha      String  @db.VarChar(64)
+  protected    Boolean
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, name])
+  @@map("github_branches")
+}
+
+/// Recent commits on the default branch.
+model GitHubCommit {
+  repositoryId String   @db.Uuid
+  sha          String   @db.VarChar(64)
+  /// First line of the commit message.
+  message      String
+  authorName   String?  @db.VarChar(255)
+  authorLogin  String?  @db.VarChar(100)
+  committedAt  DateTime @db.Timestamptz(3)
+  url          String   @db.VarChar(500)
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, sha])
+  @@index([repositoryId, committedAt])
+  @@map("github_commits")
+}
+
+model GitHubPullRequest {
+  repositoryId     String    @db.Uuid
+  number           Int
+  title            String
+  /// open | closed | merged
+  state            String    @db.VarChar(20)
+  draft            Boolean
+  authorLogin      String?   @db.VarChar(100)
+  headRef          String    @db.VarChar(255)
+  baseRef          String    @db.VarChar(255)
+  url              String    @db.VarChar(500)
+  openedAt         DateTime  @db.Timestamptz(3)
+  githubUpdatedAt  DateTime  @db.Timestamptz(3)
+  closedAt         DateTime? @db.Timestamptz(3)
+  mergedAt         DateTime? @db.Timestamptz(3)
+  /// Derived from reviews (summarizeReviews); null for closed PRs, whose reviews aren't fetched.
+  reviewStatus     String?   @db.VarChar(30)
+  approvals        Int?
+  changesRequested Int?
+  reviewsRequested Int?
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, number])
+  @@index([repositoryId, githubUpdatedAt])
+  @@map("github_pull_requests")
+}
+
+/// Issues only; GitHub's issues endpoint also returns PRs, which the sync drops.
+model GitHubIssue {
+  repositoryId    String    @db.Uuid
+  number          Int
+  title           String
+  /// open | closed
+  state           String    @db.VarChar(20)
+  authorLogin     String?   @db.VarChar(100)
+  comments        Int
+  labels          String[]
+  url             String    @db.VarChar(500)
+  openedAt        DateTime  @db.Timestamptz(3)
+  githubUpdatedAt DateTime  @db.Timestamptz(3)
+  closedAt        DateTime? @db.Timestamptz(3)
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, number])
+  @@index([repositoryId, githubUpdatedAt])
+  @@map("github_issues")
+}
+
+model GitHubWorkflowRun {
+  repositoryId    String   @db.Uuid
+  githubId        BigInt
+  name            String?  @db.VarChar(255)
+  title           String
+  branch          String?  @db.VarChar(255)
+  headSha         String   @db.VarChar(64)
+  event           String   @db.VarChar(100)
+  /// queued | in_progress | completed | …
+  status          String   @db.VarChar(30)
+  /// success | failure | cancelled | …; null until completed
+  conclusion      String?  @db.VarChar(30)
+  runNumber       Int
+  url             String   @db.VarChar(500)
+  githubCreatedAt DateTime @db.Timestamptz(3)
+  githubUpdatedAt DateTime @db.Timestamptz(3)
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, githubId])
+  @@index([repositoryId, githubCreatedAt])
+  @@map("github_workflow_runs")
 }
 
 model Milestone {
@@ -101,26 +232,57 @@ model Milestone {
 }
 
 model Task {
-  id          String       @id @default(uuid(7)) @db.Uuid
-  projectId   String       @db.Uuid
+  id            String       @id @default(uuid(7)) @db.Uuid
+  projectId     String       @db.Uuid
   /// Must belong to the same project; enforced in the task service.
-  milestoneId String?      @db.Uuid
-  title       String       @db.VarChar(300)
-  description String?
-  status      TaskStatus   @default(TODO)
-  priority    TaskPriority @default(MEDIUM)
-  dueDate     DateTime?    @db.Date
-  completedAt DateTime?    @db.Timestamptz(3)
-  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+  milestoneId   String?      @db.Uuid
+  title         String       @db.VarChar(300)
+  description   String?
+  status        TaskStatus   @default(TODO)
+  priority      TaskPriority @default(MEDIUM)
+  dueDate       DateTime?    @db.Date
+  /// AI tool the task is meant for. Assignment only: nothing runs a task (ADR-005).
+  assignedAgent AgentSource?
+  completedAt   DateTime?    @db.Timestamptz(3)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
 
-  project        Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  milestone      Milestone?      @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  project        Project          @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  milestone      Milestone?       @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
   activityEvents ActivityEvent[]
+  dependencies   TaskDependency[] @relation("dependent")
+  dependents     TaskDependency[] @relation("dependency")
+  comments       TaskComment[]
 
   @@index([projectId, status])
   @@index([milestoneId])
   @@map("tasks")
+}
+
+/// taskId can't start until dependsOnId is finished. Same project, no cycles: task service.
+model TaskDependency {
+  taskId      String   @db.Uuid
+  dependsOnId String   @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  task      Task @relation("dependent", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("dependency", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, dependsOnId])
+  @@index([dependsOnId])
+  @@map("task_dependencies")
+}
+
+model TaskComment {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  taskId    String   @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
 }
 
 /// One Claude Code or Codex session, read from its local session file (ADR-004).
@@ -133,6 +295,8 @@ model AgentSession {
   cwd                String?
   gitBranch          String?     @db.VarChar(255)
   title              String?
+  /// Provider-specific metadata from the bridge, as [{ label, value }] (Codex client, version…).
+  details            Json?
   sourcePath         String
   startedAt          DateTime?   @db.Timestamptz(3)
   lastEventAt        DateTime?   @db.Timestamptz(3)
@@ -196,6 +360,31 @@ model UsageRecord {
   @@index([occurredAt])
   @@index([model, occurredAt])
   @@map("usage_records")
+}
+
+/// One version of a model's API price in USD per million tokens, entered by the user (ADR-019).
+/// It applies from effectiveFrom until the model's next version. Never seeded or guessed.
+model ModelPrice {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  /// Exact model id as recorded in usage_records.model.
+  model             String   @db.VarChar(200)
+  /// First calendar day the price applies, in the server's time zone.
+  effectiveFrom     DateTime @db.Date
+  inputPerMTok      Decimal  @db.Decimal(12, 6)
+  outputPerMTok     Decimal  @db.Decimal(12, 6)
+  /// Null means unknown: usage with tokens of that kind gets no estimate.
+  cacheReadPerMTok  Decimal? @db.Decimal(12, 6)
+  cacheWritePerMTok Decimal? @db.Decimal(12, 6)
+  reasoningPerMTok  Decimal? @db.Decimal(12, 6)
+  /// Where the price came from (pricing page URL, date read).
+  source            String   @db.VarChar(500)
+  /// Assumptions behind the numbers.
+  notes             String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([model, effectiveFrom])
+  @@map("model_prices")
 }
 
 /// Unified timeline entry. Derived from real events only; dedupeKey stops double inserts.

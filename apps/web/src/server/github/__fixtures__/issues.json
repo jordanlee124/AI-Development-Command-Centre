@@ -1,0 +1,52 @@
+[
+  {
+    "closed_at": null,
+    "comments": 0,
+    "created_at": "2026-10-20T19:14:36Z",
+    "html_url": "https://github.com/octocat/Hello-World/pull/11592",
+    "labels": [],
+    "number": 11592,
+    "pull_request": {},
+    "state": "open",
+    "title": "Create my_file.txt",
+    "updated_at": "2026-10-21T21:47:26Z",
+    "user": { "login": "katakovalevskaa484-rgb" }
+  },
+  {
+    "closed_at": "2026-10-21T16:59:47Z",
+    "comments": 1,
+    "created_at": "2026-10-21T16:59:01Z",
+    "html_url": "https://github.com/octocat/Hello-World/pull/11594",
+    "labels": [],
+    "number": 11594,
+    "pull_request": {},
+    "state": "closed",
+    "title": "Hermes agent chain test (safe to close)",
+    "updated_at": "2026-10-21T16:59:47Z",
+    "user": { "login": "linlunson" }
+  },
+  {
+    "closed_at": "2026-10-20T05:20:25Z",
+    "comments": 0,
+    "created_at": "2026-10-20T05:20:16Z",
+    "html_url": "https://github.com/octocat/Hello-World/issues/11585",
+    "labels": [],
+    "number": 11585,
+    "state": "closed",
+    "title": "probe-x",
+    "updated_at": "2026-10-20T05:20:25Z",
+    "user": { "login": "xxyl-08" }
+  },
+  {
+    "closed_at": "2026-10-20T05:11:28Z",
+    "comments": 0,
+    "created_at": "2026-10-20T05:10:58Z",
+    "html_url": "https://github.com/octocat/Hello-World/issues/11583",
+    "labels": [],
+    "number": 11583,
+    "state": "closed",
+    "title": "t",
+    "updated_at": "2026-10-20T05:11:28Z",
+    "user": { "login": "xxyl-08" }
+  }
+]

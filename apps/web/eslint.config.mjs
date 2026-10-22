@@ -32,6 +32,8 @@ export default defineConfig([
   },
   {
     files: ["src/app/**", "src/components/**"],
+    // Tests may mock the db layer under a UI module.
+    ignores: ["**/*.test.ts"],
     rules: { "no-restricted-imports": ["error", { patterns: [uiRule] }] },
   },
   globalIgnores([

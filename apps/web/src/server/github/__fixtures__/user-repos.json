@@ -1,0 +1,41 @@
+[
+  {
+    "archived": false,
+    "default_branch": "main",
+    "description": "This repo is for demonstration purposes only.",
+    "full_name": "octocat/Spoon-Knife",
+    "has_issues": true,
+    "html_url": "https://github.com/octocat/Spoon-Knife",
+    "id": 1300192,
+    "name": "Spoon-Knife",
+    "owner": { "login": "octocat" },
+    "private": false,
+    "pushed_at": "2024-08-21T15:25:42Z"
+  },
+  {
+    "archived": false,
+    "default_branch": "master",
+    "description": "My first repository on GitHub!",
+    "full_name": "octocat/Hello-World",
+    "has_issues": true,
+    "html_url": "https://github.com/octocat/Hello-World",
+    "id": 1296269,
+    "name": "Hello-World",
+    "owner": { "login": "octocat" },
+    "private": false,
+    "pushed_at": "2024-08-20T23:54:42Z"
+  },
+  {
+    "archived": false,
+    "default_branch": "master",
+    "description": "Language Savant. If your repository's language is being reported incorrectly, send us a pull request!",
+    "full_name": "octocat/linguist",
+    "has_issues": false,
+    "html_url": "https://github.com/octocat/linguist",
+    "id": 64778136,
+    "name": "linguist",
+    "owner": { "login": "octocat" },
+    "private": false,
+    "pushed_at": "2024-08-14T07:35:16Z"
+  }
+]

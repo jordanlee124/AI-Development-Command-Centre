@@ -42,8 +42,9 @@ These are not style preferences. Breaking one is a bug.
 ## Conventions
 
 - **Package manager:** pnpm only. Never commit `package-lock.json` or `yarn.lock`.
-- **Layout:** pnpm workspace. Today only `apps/web` (Next.js). `apps/bridge` and
-  `packages/shared` arrive in Phase 4. Details in ARCHITECTURE.md.
+- **Layout:** pnpm workspace: `apps/web` (Next.js), `apps/bridge` (host-side Agent Bridge,
+  plain Node running `.ts`; relative imports keep the `.ts` extension), `packages/shared`
+  (Zod contracts, TypeScript source, no build). Details in ARCHITECTURE.md.
 - **Naming:** files `kebab-case.ts`, React components `PascalCase`, functions/vars
   `camelCase`, Prisma models `PascalCase` singular, DB tables mapped to `snake_case`.
 - **Imports:** use the `@/` alias inside `apps/web`; import shared code as `@adcc/shared`.
@@ -56,7 +57,16 @@ These are not style preferences. Breaking one is a bug.
 - **Database:** schema changes only via `pnpm db:migrate` with a committed migration. Never
   `prisma db push`. Never edit `src/generated/` (rebuilt by `prisma generate`). CHECK
   constraints are hand-written into migration SQL (Prisma can't express them).
-- **UI:** shadcn/ui components and Tailwind tokens. Don't hand-roll a widget shadcn already has.
+- **UI:** shadcn/ui (Base UI variant) components and the theme tokens in `globals.css`. Don't
+  hand-roll a widget shadcn already has, and don't hard-code colours. Add components with
+  `pnpm dlx shadcn@<version> add <name>` from `apps/web`; don't hand-edit `components/ui/`
+  beyond lint fixes.
+- **Pages:** server components that read through a service wrapped in `load()`, and render
+  data, an empty state, or `DataUnavailable`. Unknown metrics show "—", never 0 (ADR-011).
+  Links styled as buttons use `buttonVariants()` on `<Link>`, not `<Button render>`, which
+  would give the link `role="button"`.
+- **Accessibility:** every page must pass the axe WCAG 2.1 A/AA e2e scan in both themes. New
+  colours need ≥ 4.5:1 contrast for text.
 - **Errors:** fail loudly at boundaries with a typed error; never swallow an error that could
   hide lost or wrong data.
 - **Comments:** explain why, not what. Known shortcuts get `// shortcut: <limit>, <when to upgrade>`.
