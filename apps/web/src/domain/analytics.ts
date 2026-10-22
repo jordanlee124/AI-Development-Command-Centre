@@ -111,9 +111,13 @@ export function resolveAnalyticsQuery(
   const notices: string[] = [];
   let end = to ?? today;
   let start = from ?? addDays(end, -(DEFAULT_RANGE_DAYS - 1));
-  if (start > end) {
+  if (start > end && to) {
     [start, end] = [end, start];
     notices.push("The start was after the end, so they were swapped.");
+  } else if (start > end) {
+    // A future start and no end: there's nothing after today to show.
+    start = end;
+    notices.push("Days after today have no usage yet, so the range ends today.");
   }
   if (end > today) {
     end = today;
@@ -224,8 +228,9 @@ export interface TrendPoint {
   /** The period ends before the first usage ever recorded: no data, not zero. */
   noData: boolean;
   tokens: Record<AgentSource, number>;
-  estimatedUsd: Record<AgentSource, number>;
-  unpricedTokens: number;
+  /** null when all the tool's tokens are unpriced (unknown, not $0); a lower bound if some are. */
+  estimatedUsd: Record<AgentSource, number | null>;
+  unpricedTokens: Record<AgentSource, number>;
 }
 
 const perSource = (value: (source: AgentSource) => number) =>
@@ -251,8 +256,14 @@ export function analyzeUsage(
       start,
       noData: firstDay === null || nextPeriod(start, period) <= firstDay,
       tokens: perSource((s) => totalTokens(sources[s])),
-      estimatedUsd: perSource((s) => sources[s].estimatedUsd),
-      unpricedTokens: AGENT_SOURCES.reduce((sum, s) => sum + sources[s].unpricedTokens, 0),
+      estimatedUsd: Object.fromEntries(
+        AGENT_SOURCES.map((s) => {
+          const { estimatedUsd, unpricedTokens } = sources[s];
+          const unknown = unpricedTokens > 0 && unpricedTokens === totalTokens(sources[s]);
+          return [s, unknown ? null : estimatedUsd];
+        }),
+      ) as Record<AgentSource, number | null>,
+      unpricedTokens: perSource((s) => sources[s].unpricedTokens),
     };
   });
 
@@ -335,12 +346,21 @@ function optionalAmount(max: number, integer: boolean) {
     .number({ error: "Enter a number, or leave blank for no budget" })
     .positive("Must be more than 0")
     .max(max);
-  return z
-    .string()
-    .trim()
-    .optional()
-    .transform((value) => (value ? Number(value.replaceAll(",", "")) : null))
-    .pipe((integer ? amount.int("Enter a whole number") : amount).nullable());
+  return (
+    z
+      .string()
+      .trim()
+      .optional()
+      // Commas only as thousands separators: "25,50" (a decimal comma) is refused, not read as 2550.
+      .transform((value) =>
+        !value
+          ? null
+          : /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(value)
+            ? Number(value.replaceAll(",", ""))
+            : Number(value),
+      )
+      .pipe((integer ? amount.int("Enter a whole number") : amount).nullable())
+  );
 }
 
 export const analyticsSettingsFormSchema = z
@@ -368,7 +388,8 @@ export interface BudgetMeter {
   used: number;
   limit: number;
   percent: number;
-  level: "ok" | "warning" | "over";
+  /** "unknown": some usage has no price and the known part isn't over, so ok/near can't be said. */
+  level: "ok" | "warning" | "over" | "unknown";
   /** Some usage has no estimate, so the real figure is at least `used`. */
   lowerBound: boolean;
 }
@@ -376,7 +397,7 @@ export interface BudgetMeter {
 function meter(used: number, limit: number, warnPercent: number, lowerBound: boolean) {
   const percent = (used / limit) * 100;
   const level: BudgetMeter["level"] =
-    percent >= 100 ? "over" : percent >= warnPercent ? "warning" : "ok";
+    percent >= 100 ? "over" : lowerBound ? "unknown" : percent >= warnPercent ? "warning" : "ok";
   return { used, limit, percent, level, lowerBound };
 }
 

@@ -1,6 +1,7 @@
+import { DomainError } from "@/domain/errors";
 import type { PriceInput, PriceVersion } from "@/domain/pricing";
 import { toDateInput } from "@/domain/validation";
-import type { ModelPrice, Prisma } from "@/generated/prisma/client";
+import { Prisma, type ModelPrice } from "@/generated/prisma/client";
 import { recordActivity, type NewActivity } from "./activity";
 import { getPrisma } from "./client";
 
@@ -42,18 +43,38 @@ export function findPriceVersion(model: string, effectiveFrom: Date) {
 
 type PriceData = Omit<PriceInput, "id">;
 
+/** The service checks first; this catches a save racing it to the same (model, day). */
+async function uniqueDay(write: Promise<void>) {
+  try {
+    await write;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new DomainError(
+        "CONFLICT",
+        "This model already has a price starting that day. Edit that one instead.",
+        "effectiveFrom",
+      );
+    }
+    throw error;
+  }
+}
+
 export function insertPrice(data: PriceData, activity: NewActivity) {
-  return getPrisma().$transaction(async (tx) => {
-    await tx.modelPrice.create({ data });
-    await recordActivity(tx, activity);
-  });
+  return uniqueDay(
+    getPrisma().$transaction(async (tx) => {
+      await tx.modelPrice.create({ data });
+      await recordActivity(tx, activity);
+    }),
+  );
 }
 
 export function updatePrice(id: string, data: PriceData, activity: NewActivity) {
-  return getPrisma().$transaction(async (tx) => {
-    await tx.modelPrice.update({ where: { id }, data });
-    await recordActivity(tx, activity);
-  });
+  return uniqueDay(
+    getPrisma().$transaction(async (tx) => {
+      await tx.modelPrice.update({ where: { id }, data });
+      await recordActivity(tx, activity);
+    }),
+  );
 }
 
 export function deletePriceRow(id: string, activity: NewActivity) {

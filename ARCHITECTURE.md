@@ -257,7 +257,8 @@ billing, budgets), /analytics/export (CSV, same range)
 - **Unknown stays unknown:** usage with no price on its day, or with tokens of a kind whose
   rate is blank, has no estimate. Totals add only what could be estimated and carry the
   unpriced token count, so a partly priced figure shows as "≥ $x" and a wholly unpriced one as
-  "No price", never $0. Budget meters say "at least" in that case.
+  "No price", never $0, per tool in each trend period too. A budget meter with unpriced usage
+  says it can't tell, unless even the known part is over.
 - **Days** are calendar days in the server's time zone (the user's machine), computed in SQL
   with `AT TIME ZONE` and in JS with `Intl`. Ranges come from `?from=&to=&period=`; anything
   invalid falls back to the last 30 days with a notice, ranges end today and are capped at

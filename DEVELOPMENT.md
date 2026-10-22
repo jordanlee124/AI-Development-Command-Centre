@@ -304,6 +304,8 @@ What the page will and won't tell you:
   invented data. The server is a production build, which answers before React hydrates:
   open dialogs and menus with `clickUntilOpen` (`e2e/helpers.ts`) and send shortcuts with
   `pressUntil`.
+- **E2E time zone:** the e2e server runs with `TZ=Asia/Seoul`, so analytics day boundaries
+  are tested ahead of UTC on any machine.
 - **E2E database (ADR-014):** global setup creates `adcc_e2e` next to the dev database (same
   server and credentials from `apps/web/.env`), migrates it and truncates it on every run.
   Flows that write data skip when `/api/health` is not `ok`. Name created rows with the

@@ -30,6 +30,8 @@ export default defineConfig({
       GITHUB_API_URL: `http://127.0.0.1:${GITHUB_MOCK_PORT}`,
       GITHUB_SYNC_INTERVAL_MINUTES: "0",
       ADCC_BRIDGE_TOKEN: E2E_BRIDGE_TOKEN,
+      // A fixed zone ahead of UTC, so analytics.spec.ts can check day boundaries on any machine.
+      TZ: "Asia/Seoul",
     },
   },
 });

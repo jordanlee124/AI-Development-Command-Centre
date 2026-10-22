@@ -427,6 +427,30 @@ chart`; its prompt to overwrite `card.tsx` was declined). The request asked for 
     for tens of thousands of records (comment in `server/db/usage.ts`).
   - The session table shows the top 25 by tokens; the CSV has all of them.
 - Phase 10 must run the web container with the host's `TZ`, or analytics days become UTC days.
+- Independent code review fixes:
+  - The cost-over-time chart and table showed $0.00 for a tool whose usage had no price when
+    another tool was priced (a unit test even asserted it). A tool's period cost is now unknown
+    (`null`): no bar, "No price" in the table, and "≥" with a per-tool note when partly priced.
+  - The budget meter said "Within budget" / "Near budget" from a lower bound. With unpriced
+    usage it now says it can't tell (or "Budget reached" when even the known part is over), and
+    "No price covers this month's usage" instead of a 0% bar.
+  - A range wholly before the first recorded usage showed 0 tokens and $0.00; those cards now
+    show "—" and the empty state says there's no data that far back.
+  - Nothing tested the SQL day grouping: the e2e server now runs with `TZ=Asia/Seoul`, and a
+    test puts responses at 23:59 and 00:01 Seoul time on two different days (checked to fail
+    when the query groups by UTC day).
+  - Budget fields accept commas only as thousands separators ("25,50" was read as 2550); a
+    price saved twice at once gets the conflict message instead of "couldn't save"; labels
+    carry the year when a range spans years; a future start with no end no longer reports a
+    swap; the settings page no longer says every model is priced when some usage still isn't.
+- Not done from the review:
+  - Weekly and monthly bars at the edges of a range are labelled with the whole period but
+    hold only the days inside the range.
+  - The Overview's "Tokens · 30 days" is a rolling 30×24 h window, the Analytics preset is 30
+    calendar days, so the two can differ (Overview predates Phase 7).
+  - A real model or project named "Other" or "Unassigned" would share a chart label with the
+    synthetic one.
+  - The CSV prints an estimate under $0.0000005 as `0.000000`.
 
 ## Phase 8 — Activity timeline
 

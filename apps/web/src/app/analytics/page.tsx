@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   ChartColumn,
   CircleCheck,
+  CircleHelp,
   Coins,
   Download,
   Hash,
@@ -17,6 +18,7 @@ import {
   AGENT_SOURCES,
   PROVIDER_CAPABILITIES,
   totalTokens,
+  type AgentSource,
   type TokenTotals,
 } from "@/domain/agent";
 import {
@@ -170,6 +172,9 @@ function RangeControls({ data }: { data: Analytics }) {
 function AnalyticsView({ data }: { data: Analytics }) {
   const { usage } = data;
   const empty = usage.totals.records === 0;
+  // The whole range is before anything was recorded: unknown, not zero (ADR-011).
+  const beforeRecords = data.firstDay !== null && data.range.to < data.firstDay;
+  const notRecorded = `Usage is recorded from ${formatDay(data.firstDay ?? data.range.to)}`;
   return (
     <>
       <RangeControls data={data} />
@@ -181,14 +186,18 @@ function AnalyticsView({ data }: { data: Analytics }) {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Recorded tokens"
-          value={formatCompact(totalTokens(usage.totals))}
-          hint={`${formatNumber(totalTokens(usage.totals))} tokens · ${formatNumber(usage.totals.records)} responses`}
+          value={beforeRecords ? null : formatCompact(totalTokens(usage.totals))}
+          hint={
+            beforeRecords
+              ? notRecorded
+              : `${formatNumber(totalTokens(usage.totals))} tokens · ${formatNumber(usage.totals.records)} responses`
+          }
           icon={Hash}
         />
         <StatCard
           label="Estimated API-equivalent cost"
-          value={costText(usage.totals)}
-          hint={costHint(usage.totals)}
+          value={beforeRecords ? null : costText(usage.totals)}
+          hint={beforeRecords ? notRecorded : costHint(usage.totals)}
           icon={Coins}
         />
         <StatCard
@@ -199,8 +208,8 @@ function AnalyticsView({ data }: { data: Analytics }) {
         />
         <StatCard
           label="Sessions"
-          value={formatNumber(usage.totals.sessions)}
-          hint="With recorded usage in this range"
+          value={beforeRecords ? null : formatNumber(usage.totals.sessions)}
+          hint={beforeRecords ? notRecorded : "With recorded usage in this range"}
           icon={ChartColumn}
         />
       </div>
@@ -211,8 +220,12 @@ function AnalyticsView({ data }: { data: Analytics }) {
       {empty ? (
         <EmptyState
           icon={ChartColumn}
-          title="No usage in this range"
-          description={`Usage has been recorded since ${formatDay(data.firstDay ?? data.range.from)}, but none between these dates. Pick a wider range.`}
+          title={beforeRecords ? "Nothing recorded this far back" : "No usage in this range"}
+          description={
+            beforeRecords
+              ? `${notRecorded}, so there is no data for these dates (not zero usage). Pick a later range.`
+              : `Usage has been recorded since ${formatDay(data.firstDay ?? data.range.from)}, but none between these dates. Pick a wider range.`
+          }
         />
       ) : (
         <>
@@ -230,10 +243,14 @@ function AnalyticsView({ data }: { data: Analytics }) {
 
 // --- Cost display: an estimate, a lower bound, or unknown; never 0 for "no price" ---
 
+/** null: every token is unpriced, so there's no estimate at all. "≥" when only some are. */
+function costLabel(usd: number, unpricedTokens: number, tokens: number): string | null {
+  if (tokens > 0 && unpricedTokens === tokens) return null;
+  return unpricedTokens > 0 ? `≥ ${formatUsd(usd)}` : formatUsd(usd);
+}
+
 function costText(s: UsageSummary): string | null {
-  const total = totalTokens(s);
-  if (total > 0 && s.unpricedTokens === total) return null;
-  return s.unpricedTokens > 0 ? `≥ ${formatUsd(s.estimatedUsd)}` : formatUsd(s.estimatedUsd);
+  return costLabel(s.estimatedUsd, s.unpricedTokens, totalTokens(s));
 }
 
 function costHint(s: UsageSummary): string {
@@ -396,6 +413,12 @@ const LEVELS: Record<
     tone: "text-destructive",
     bar: "[&_[data-slot=progress-indicator]]:bg-destructive",
   },
+  unknown: {
+    label: "Can't tell: some usage this month has no price, so the real figure is higher",
+    icon: CircleHelp,
+    tone: "text-muted-foreground",
+    bar: "",
+  },
 };
 
 function BudgetMeterRow({
@@ -409,6 +432,17 @@ function BudgetMeterRow({
 }) {
   const level = LEVELS[meter.level];
   const Icon = level.icon;
+  if (meter.lowerBound && meter.used === 0) {
+    return (
+      <li className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground">
+          No price covers this month&apos;s usage, so it can&apos;t be compared with the{" "}
+          {format(meter.limit)} budget.
+        </span>
+      </li>
+    );
+  }
   return (
     <li className="flex flex-col gap-2 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -425,11 +459,6 @@ function BudgetMeterRow({
       />
       <span className={cn("flex items-center gap-1.5 text-xs", level.tone)}>
         <Icon aria-hidden className="size-3.5" /> {level.label}
-        {meter.lowerBound && (
-          <span className="text-muted-foreground">
-            · some usage has no price, so the real figure is higher
-          </span>
-        )}
       </span>
     </li>
   );
@@ -468,30 +497,45 @@ function BudgetCard({ data }: { data: Analytics }) {
   );
 }
 
-function periodLabel(start: string, period: Period) {
+/** `withYear` for ranges spanning years, where "Oct 22" alone would repeat. */
+function periodLabel(start: string, period: Period, withYear: boolean) {
   const date = new Date(`${start}T00:00:00Z`);
   return new Intl.DateTimeFormat(undefined, {
     timeZone: "UTC",
-    ...(period === "month"
-      ? { month: "short", year: "numeric" }
-      : { month: "short", day: "numeric" }),
+    month: "short",
+    ...(period === "month" || withYear ? { year: "numeric" } : {}),
+    ...(period === "month" ? {} : { day: "numeric" }),
   }).format(date);
 }
 
-function trendData(points: TrendPoint[], period: Period, unit: "tokens" | "usd"): TrendDatum[] {
+function trendData(
+  points: TrendPoint[],
+  period: Period,
+  unit: "tokens" | "usd",
+  withYear: boolean,
+): TrendDatum[] {
   return points.map((point) => {
-    const values = unit === "tokens" ? point.tokens : point.estimatedUsd;
-    if (point.noData) {
-      return { label: periodLabel(point.start, period), note: "No usage recorded this far back" };
+    const label = periodLabel(point.start, period, withYear);
+    if (point.noData) return { label, note: "No usage recorded this far back" };
+    if (unit === "tokens") return { label, note: null, ...point.tokens };
+    // A tool whose tokens are all unpriced gets no bar (not a $0 one); partial ones are noted.
+    const datum: TrendDatum = { label, note: null };
+    const notes: string[] = [];
+    for (const s of AGENT_SOURCES) {
+      const usd = point.estimatedUsd[s];
+      const unpriced = point.unpricedTokens[s];
+      if (usd === null) {
+        notes.push(`${AGENT_SOURCE_LABELS[s]}: no price`);
+        continue;
+      }
+      datum[s] = usd;
+      if (unpriced > 0) {
+        notes.push(
+          `${AGENT_SOURCE_LABELS[s]}: at least, ${formatCompact(unpriced)} tokens unpriced`,
+        );
+      }
     }
-    return {
-      label: periodLabel(point.start, period),
-      note:
-        unit === "usd" && point.unpricedTokens > 0
-          ? `Excludes ${formatCompact(point.unpricedTokens)} tokens with no price`
-          : null,
-      ...values,
-    };
+    return { ...datum, note: notes.join(" · ") || null };
   });
 }
 
@@ -499,12 +543,18 @@ function TrendTable({
   points,
   period,
   unit,
+  withYear,
 }: {
   points: TrendPoint[];
   period: Period;
   unit: "tokens" | "usd";
+  withYear: boolean;
 }) {
-  const format = unit === "usd" ? formatUsd : formatNumber;
+  const cell = (point: TrendPoint, s: AgentSource) => {
+    if (unit === "tokens") return formatNumber(point.tokens[s]);
+    const usd = point.estimatedUsd[s];
+    return usd === null ? "No price" : costLabel(usd, point.unpricedTokens[s], point.tokens[s]);
+  };
   return (
     <details className="text-sm">
       <summary className="cursor-pointer text-muted-foreground">Show as table</summary>
@@ -519,27 +569,17 @@ function TrendTable({
                 {AGENT_SOURCE_LABELS[s]}
               </TableHead>
             ))}
-            {unit === "usd" && <TableHead className="text-right">Unpriced tokens</TableHead>}
           </TableRow>
         </TableHeader>
         <TableBody>
           {points.map((point) => (
             <TableRow key={point.start}>
-              <TableCell>{periodLabel(point.start, period)}</TableCell>
+              <TableCell>{periodLabel(point.start, period, withYear)}</TableCell>
               {AGENT_SOURCES.map((s) => (
                 <TableCell key={s} className="text-right tabular-nums">
-                  {point.noData ? (
-                    <NotAvailable />
-                  ) : (
-                    format((unit === "usd" ? point.estimatedUsd : point.tokens)[s])
-                  )}
+                  {point.noData ? <NotAvailable /> : cell(point, s)}
                 </TableCell>
               ))}
-              {unit === "usd" && (
-                <TableCell className="text-right tabular-nums">
-                  {point.noData ? <NotAvailable /> : formatNumber(point.unpricedTokens)}
-                </TableCell>
-              )}
             </TableRow>
           ))}
         </TableBody>
@@ -551,6 +591,7 @@ function TrendTable({
 function TrendCards({ data }: { data: Analytics }) {
   const { trend } = data.usage;
   const period = PERIOD_LABELS[data.period].toLowerCase();
+  const withYear = data.range.from.slice(0, 4) !== data.range.to.slice(0, 4);
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Section
@@ -558,11 +599,11 @@ function TrendCards({ data }: { data: Analytics }) {
         description={`Verified counts, ${period}, by tool.`}
       >
         <TrendChart
-          data={trendData(trend, data.period, "tokens")}
+          data={trendData(trend, data.period, "tokens", withYear)}
           unit="tokens"
           label={`Recorded tokens ${period} by tool. The table below has the same numbers.`}
         />
-        <TrendTable points={trend} period={data.period} unit="tokens" />
+        <TrendTable points={trend} period={data.period} unit="tokens" withYear={withYear} />
       </Section>
       <Section
         title="Estimated API-equivalent cost over time"
@@ -582,11 +623,11 @@ function TrendCards({ data }: { data: Analytics }) {
         ) : (
           <>
             <TrendChart
-              data={trendData(trend, data.period, "usd")}
+              data={trendData(trend, data.period, "usd", withYear)}
               unit="usd"
               label={`Estimated API-equivalent cost ${period} by tool. The table below has the same numbers.`}
             />
-            <TrendTable points={trend} period={data.period} unit="usd" />
+            <TrendTable points={trend} period={data.period} unit="usd" withYear={withYear} />
           </>
         )}
       </Section>

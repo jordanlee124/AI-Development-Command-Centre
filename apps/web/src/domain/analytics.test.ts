@@ -152,6 +152,14 @@ describe("resolveAnalyticsQuery", () => {
     expect(result.notice).toMatch(/swapped/);
   });
 
+  it("doesn't call a future start with no end a swap", () => {
+    expect(resolveAnalyticsQuery({ from: "2027-01-01" }, today)).toEqual({
+      range: { from: today, to: today },
+      period: "day",
+      notice: "Days after today have no usage yet, so the range ends today.",
+    });
+  });
+
   it("ends at today, since later days can have no usage", () => {
     expect(resolveAnalyticsQuery({ from: "2026-10-01", to: "2026-12-31" }, today).range.to).toBe(
       today,
@@ -289,8 +297,24 @@ describe("analyzeUsage", () => {
     });
     expect(byDay["2026-10-22"]).toMatchObject({
       tokens: { CLAUDE_CODE: 1_000_000, CODEX: 300 },
-      estimatedUsd: { CLAUDE_CODE: 1, CODEX: 0 },
-      unpricedTokens: 300,
+      // Codex's tokens that day all have no price: unknown, never $0.
+      estimatedUsd: { CLAUDE_CODE: 1, CODEX: null },
+      unpricedTokens: { CLAUDE_CODE: 0, CODEX: 300 },
+    });
+    // A tool with no usage that day really did cost $0.
+    expect(byDay["2026-10-21"]).toMatchObject({ estimatedUsd: { CLAUDE_CODE: 0, CODEX: 0 } });
+  });
+
+  it("keeps a partly priced tool's cost as a lower bound in the trend", () => {
+    const partly = analyzeUsage(
+      priceRows([row(), row({ model: "model-x", inputTokens: 50 })], prices),
+      { from: "2026-10-20", to: "2026-10-20" },
+      "day",
+      "2026-10-20",
+    );
+    expect(partly.trend[0]).toMatchObject({
+      estimatedUsd: { CLAUDE_CODE: 2 },
+      unpricedTokens: { CLAUDE_CODE: 50 },
     });
   });
 
@@ -338,14 +362,34 @@ describe("budgetStatus", () => {
     const partial = summarize(
       priceRows([row({ inputTokens: 800_000 }), row({ model: "model-x" })], [price()]),
     );
+    // 80% is only what's known; the real figure is higher, so ok/near can't be claimed.
     expect(budgetStatus(partial, { ...budget, monthlyCostUsd: 2 }).cost).toEqual({
       used: 1.6,
       limit: 2,
       percent: 80,
-      level: "warning",
+      level: "unknown",
       lowerBound: true,
     });
-    expect(budgetStatus(month, { ...budget, monthlyCostUsd: 2 }).cost?.lowerBound).toBe(false);
+    expect(budgetStatus(month, { ...budget, monthlyCostUsd: 2 }).cost).toMatchObject({
+      level: "warning",
+      lowerBound: false,
+    });
+  });
+
+  it("is over budget when even the known part is over", () => {
+    const partial = summarize(
+      priceRows([row({ inputTokens: 800_000 }), row({ model: "model-x" })], [price()]),
+    );
+    expect(budgetStatus(partial, { ...budget, monthlyCostUsd: 1 }).cost?.level).toBe("over");
+  });
+
+  it("is unknown, not within budget, when nothing has a price", () => {
+    const unpriced = summarize(priceRows([row({ model: "model-x" })], [price()]));
+    expect(budgetStatus(unpriced, { ...budget, monthlyCostUsd: 50 }).cost).toMatchObject({
+      used: 0,
+      level: "unknown",
+      lowerBound: true,
+    });
   });
 });
 
@@ -370,6 +414,7 @@ describe("analyticsSettingsFormSchema", () => {
     ["a zero budget", { monthlyCostUsd: "0" }],
     ["text", { monthlyCostUsd: "lots" }],
     ["a warning over 100%", { warnPercent: "120" }],
+    ["a decimal comma", { monthlyCostUsd: "25,50" }],
     ["an unknown billing type", { billing_CODEX: "FREE" }],
   ])("refuses %s", (_, change) => {
     expect(analyticsSettingsFormSchema.safeParse({ ...form, ...change }).success).toBe(false);

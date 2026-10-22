@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { IngestRequest, SessionBatch } from "@adcc/shared";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { newTranscriptState, parseTranscriptLines } from "../../bridge/src/claude-transcript.ts";
 import { E2E_BRIDGE_TOKEN } from "../playwright.config";
 import { axeViolations, clickUntilOpen } from "./helpers";
@@ -20,19 +20,24 @@ const modelRow = (page: Page) => main(page).getByRole("row", { name: new RegExp(
 
 let recordedTokens = 0;
 
-function batch(): SessionBatch {
+function batch(
+  sessionId = SESSION,
+  model = MODEL,
+  times: (index: number) => string = () => new Date(Date.now() - 60_000).toISOString(),
+): SessionBatch {
   const text = readFileSync(
     new URL("../../bridge/src/__fixtures__/claude-session.jsonl", import.meta.url),
     "utf8",
   );
   const lines = text.split("\n").map((line, i) => ({ text: line, lineNo: i + 1 }));
   const { events, skipped } = parseTranscriptLines(lines, newTranscriptState());
-  // Recent, so it falls in the default 30-day range; unique ids so nothing counts as a repeat.
-  const occurredAt = new Date(Date.now() - 60_000).toISOString();
+  // By default recent, so it falls in the default 30-day range. Unique ids so nothing counts as
+  // a repeat of another run's usage. `times` gets the index of the usage record so far.
+  let responses = 0;
   return {
     source: "CLAUDE_CODE",
-    sessionId: SESSION,
-    sourcePath: `C:\\Users\\e2e\\.claude\\projects\\x\\${SESSION}.jsonl`,
+    sessionId,
+    sourcePath: `C:\\Users\\e2e\\.claude\\projects\\x\\${sessionId}.jsonl`,
     cwd: `D:\\e2e\\analytics-${run}`,
     gitBranch: null,
     title: `Analytics fixture ${run}`,
@@ -40,9 +45,9 @@ function batch(): SessionBatch {
     skippedRecords: skipped,
     events: events.map((e) => ({
       ...e,
-      externalId: `${e.externalId}:${run}`,
-      occurredAt,
-      usage: e.usage && { ...e.usage, model: MODEL },
+      externalId: `${e.externalId}:${sessionId}`,
+      occurredAt: times(e.usage ? responses++ : responses),
+      usage: e.usage && { ...e.usage, model },
     })),
   };
 }
@@ -58,6 +63,10 @@ test.beforeAll(async ({ request }) => {
         u.inputTokens + u.outputTokens + u.reasoningTokens + u.cacheReadTokens + u.cacheWriteTokens;
     }
   }
+  await ingest(request, [session]);
+});
+
+async function ingest(request: APIRequestContext, sessions: SessionBatch[]) {
   const now = new Date().toISOString();
   const body: IngestRequest = {
     bridge: {
@@ -68,14 +77,14 @@ test.beforeAll(async ({ request }) => {
       providers: [],
       errors: [],
     },
-    sessions: [session],
+    sessions,
   };
   const response = await request.post("/api/bridge/ingest", {
     data: body,
     headers: { authorization: `Bearer ${E2E_BRIDGE_TOKEN}` },
   });
   expect(response.status()).toBe(200);
-});
+}
 
 test("recorded usage shows by model, unpriced, never as $0", async ({ page }) => {
   await page.goto("/analytics");
@@ -188,7 +197,7 @@ test("CSV export holds the range's rows, with cost labelled an estimate", async 
   expect(response.headers()["content-disposition"]).toMatch(/attachment; filename="adcc-usage-/);
   const csv = await response.text();
   expect(csv.split("\r\n")[0]).toContain("estimated_api_equivalent_cost_usd");
-  const line = csv.split("\r\n").find((l) => l.includes(MODEL));
+  const line = csv.split("\r\n").find((l) => l.includes(`,${MODEL},`));
   expect(line).toContain(`,${recordedTokens},`);
   expect(line).toMatch(/No price for this model on this date$/);
 });
@@ -215,3 +224,25 @@ for (const theme of ["dark", "light"] as const) {
     }
   });
 }
+
+test("days are calendar days in the server's time zone, in SQL as on the page", async ({
+  page,
+  request,
+}) => {
+  // playwright.config.ts runs the server with TZ=Asia/Seoul (UTC+9). 14:59 and 15:01 UTC are
+  // 23:59 on 1 Oct and 00:01 on 2 Oct there: two days, though in UTC they'd be one.
+  const model = `${MODEL}-tz`;
+  const half = (i: number) =>
+    i % 2 === 0 ? "2026-10-01T14:59:00.000Z" : "2026-10-01T15:01:00.000Z";
+  await ingest(request, [batch(`tz-${run}`, model, half)]);
+
+  const csv = await (await request.get("/analytics/export?from=2026-10-01&to=2026-10-02")).text();
+  const days = csv
+    .split("\r\n")
+    .filter((line) => line.includes(`,${model},`))
+    .map((line) => line.slice(0, 10));
+  expect(days.sort()).toEqual(["2026-10-01", "2026-10-02"]);
+
+  await page.goto("/analytics?from=2026-10-01&to=2026-10-02");
+  await expect(main(page).getByText("Days are calendar days in Asia/Seoul.")).toBeVisible();
+});

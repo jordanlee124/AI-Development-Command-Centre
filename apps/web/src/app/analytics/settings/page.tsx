@@ -196,7 +196,10 @@ function UnpricedModels({ models }: { models: { model: string; tokens: number }[
       </CardHeader>
       <CardContent>
         {models.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Every recorded model has a price.</p>
+          <p className="text-sm text-muted-foreground">
+            Every recorded model has at least one price. Usage before a model&apos;s first price, or
+            of a kind whose rate is blank, is still unpriced: Analytics lists it under Missing data.
+          </p>
         ) : (
           <ul className="flex flex-col divide-y">
             {models.map(({ model, tokens }) => (
