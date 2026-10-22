@@ -3,6 +3,7 @@ const compactFormat = new Intl.NumberFormat(undefined, {
   notation: "compact",
   maximumFractionDigits: 1,
 });
+const usdFormat = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 // @db.Date values arrive as UTC midnight; formatting them in local time can show the day before.
 const dateOnlyFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
@@ -19,6 +20,16 @@ export function formatNumber(n: number): string {
 /** 1234567 → "1.2M". Use where space is tight; show the exact value in a title. */
 export function formatCompact(n: number): string {
   return compactFormat.format(n);
+}
+
+/** US dollars to the cent; a positive amount under a cent says so instead of showing $0.00. */
+export function formatUsd(n: number): string {
+  return n > 0 && n < 0.005 ? `< ${usdFormat.format(0.01)}` : usdFormat.format(n);
+}
+
+/** "YYYY-MM-DD" calendar day → "Oct 22, 2026". */
+export function formatDay(day: string): string {
+  return dateOnlyFormat.format(new Date(`${day}T00:00:00Z`));
 }
 
 export function formatDate(date: Date): string {

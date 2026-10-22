@@ -235,6 +235,37 @@ None of these formats is documented, and they differ from Claude Code's. Limitat
 - On a Claude Code version without `claude agents --json`, or if `claude.exe` isn't the npm
   install (set `CLAUDE_EXE`), the live check fails and every session shows _Unverified_.
 
+## Usage analytics (Phase 7, ADR-019)
+
+`/analytics` reads the token usage the bridge has stored; there's nothing to set up for the
+counts. Costs need prices, which ADCC never ships or fetches:
+
+1. Open **Analytics → Prices and budgets** (`/analytics/settings`). _Recorded models with no
+   price_ lists every model id seen in usage.
+2. **Add price** for each, from the provider's published price list: USD per million tokens,
+   the first day it applies, and where you read it. Leave a rate blank if you don't know it;
+   usage with that kind of token then shows as unpriced rather than guessed. Anthropic and
+   OpenAI bill thinking/reasoning tokens as output, so enter the output rate there if that's
+   what their price list says.
+3. When a price changes, add a new version with the new date. Earlier usage keeps the old one.
+4. Say how you pay for each tool (API key or subscription) and, optionally, set monthly token
+   or estimated-cost budgets and the warning percentage.
+
+What the page will and won't tell you:
+
+- **Recorded tokens** are verified counts from session files. **Estimated API-equivalent
+  cost** is those counts × your prices: never a charge. **Billed cost** isn't available; your
+  provider's console has it. On a subscription there is no per-token charge at all.
+- Days are calendar days in this machine's time zone (shown on the page). Weeks start on
+  Monday. Budgets compare the current calendar month to date.
+- Usage with no price shows as "No price" and totals as "≥ $x"; the _Missing data_ card says
+  how much and why, along with sessions not linked to a project, sessions with unread records,
+  and the first day usage was recorded (earlier periods are "no data", not zero).
+- **Export CSV** downloads the shown range, one line per day, session and model, with the
+  price version used and the estimate (blank when unknown).
+- Not modelled: discounts, batch or regional pricing, long-context tiers, cache-write
+  durations, taxes and credits. Note what a price assumes in its _Assumptions_ field.
+
 ## Ports
 
 | Port  | What                      | Note                               |
@@ -263,7 +294,9 @@ None of these formats is documented, and they differ from Claude Code's. Limitat
   pages; `accessibility.spec.ts` runs axe (WCAG 2.1 A/AA) on every page in dark and light;
   `projects.spec.ts` runs the project/task/board flows and axe on detail pages and dialogs;
   `agents.spec.ts` feeds the bridge's redacted Claude Code and Codex fixtures through their
-  real parsers into `/api/bridge/ingest` and checks the agent pages; `github.spec.ts` links, syncs and browses a repository against a loopback mock GitHub
+  real parsers into `/api/bridge/ingest` and checks the agent pages; `analytics.spec.ts` ingests the
+  Claude Code fixture under a run-unique model id, then adds and deletes a fixture price,
+  saves budgets, exports CSV and runs axe on the analytics pages with data; `github.spec.ts` links, syncs and browses a repository against a loopback mock GitHub
   (`e2e/github-mock.ts`, recorded fixtures) that Playwright starts and points the app at, so
   e2e never calls the real GitHub whatever `.env` holds. Query page content inside `#main`:
   while a page streams in, React briefly parks the next chunk in a hidden div outside it.

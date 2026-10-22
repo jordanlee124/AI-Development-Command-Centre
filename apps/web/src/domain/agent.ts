@@ -27,17 +27,22 @@ export const PROVIDER_CAPABILITIES: Record<
     titles: string;
     /** Records turns and the operations (commands, edits, MCP calls) that ran in them. */
     operations: boolean;
+    /** Which token counts the tool writes, shown beside its usage (Phase 7). */
+    usage: string;
   }
 > = {
   CLAUDE_CODE: {
     liveStatus: "claude agents --json",
     titles: "AI-generated title in the transcript",
     operations: false,
+    usage: "Input, output, thinking, cache read and cache write tokens per response.",
   },
   CODEX: {
     liveStatus: null,
     titles: "Thread name from ~/.codex/session_index.jsonl",
     operations: true,
+    usage:
+      "Input, output, reasoning and cached-input tokens per response. Cache writes were 0 in every record seen, so they may not be reported.",
   },
 };
 

@@ -9,6 +9,7 @@ const paths = [
   "/agents",
   "/github",
   "/analytics",
+  "/analytics/settings",
   "/activity",
   "/settings",
 ];

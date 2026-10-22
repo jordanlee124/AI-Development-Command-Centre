@@ -362,6 +362,31 @@ model UsageRecord {
   @@map("usage_records")
 }
 
+/// One version of a model's API price in USD per million tokens, entered by the user (ADR-019).
+/// It applies from effectiveFrom until the model's next version. Never seeded or guessed.
+model ModelPrice {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  /// Exact model id as recorded in usage_records.model.
+  model             String   @db.VarChar(200)
+  /// First calendar day the price applies, in the server's time zone.
+  effectiveFrom     DateTime @db.Date
+  inputPerMTok      Decimal  @db.Decimal(12, 6)
+  outputPerMTok     Decimal  @db.Decimal(12, 6)
+  /// Null means unknown: usage with tokens of that kind gets no estimate.
+  cacheReadPerMTok  Decimal? @db.Decimal(12, 6)
+  cacheWritePerMTok Decimal? @db.Decimal(12, 6)
+  reasoningPerMTok  Decimal? @db.Decimal(12, 6)
+  /// Where the price came from (pricing page URL, date read).
+  source            String   @db.VarChar(500)
+  /// Assumptions behind the numbers.
+  notes             String?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([model, effectiveFrom])
+  @@map("model_prices")
+}
+
 /// Unified timeline entry. Derived from real events only; dedupeKey stops double inserts.
 model ActivityEvent {
   id             String   @id @default(uuid(7)) @db.Uuid

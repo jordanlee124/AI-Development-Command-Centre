@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDateOnly, formatRelative } from "./format";
+import { formatDateOnly, formatRelative, formatUsd } from "./format";
 
 const now = new Date("2026-10-21T12:00:00Z");
 const ago = (ms: number) => new Date(now.getTime() - ms);
@@ -30,5 +30,18 @@ describe("formatDateOnly", () => {
     }).format(due);
     expect(formatDateOnly(due)).toBe(expected);
     expect(formatDateOnly(due)).toContain("21");
+  });
+});
+
+describe("formatUsd", () => {
+  const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" });
+
+  it("shows cents", () => {
+    expect(formatUsd(12.345)).toBe(usd.format(12.35));
+    expect(formatUsd(0)).toBe(usd.format(0));
+  });
+
+  it("doesn't round a real amount under half a cent down to zero", () => {
+    expect(formatUsd(0.001)).toBe(`< ${usd.format(0.01)}`);
   });
 });

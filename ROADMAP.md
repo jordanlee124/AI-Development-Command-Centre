@@ -7,7 +7,7 @@ validation gate has run. Start a phase only when asked.
 `pnpm build`, and `pnpm test:e2e` where applicable. Record anything that could not run under
 the phase's _Notes_.
 
-**Current phase:** Phase 6 complete → next is Phase 7.
+**Current phase:** Phase 7 complete → next is Phase 8.
 
 Phase numbering changed in Phase 2: the dashboard interface was inserted as Phase 2, so every
 later phase moved up by one.
@@ -372,13 +372,61 @@ Notes:
   - Bridge-side provider isolation (`listAll` in `main.ts`) has no unit test, because
     `main.ts` starts the loop on import; it's covered by e2e only from the web side.
 
-## Phase 7 — Token and cost analytics
+## Phase 7 — Token and cost analytics ✅
 
-- [ ] Versioned price table (model, input/output/cache rates, effective dates), user-editable
-- [ ] Cost computed from real token counts only; unknown shown as unknown
-- [ ] Recharts views: usage over time, by project, by model, by source
-- [ ] Unit tests for cost maths including price changes over time
-- [ ] Validation gate passes
+- [x] Versioned price table (model, input/output/cache/reasoning rates, effective dates, source,
+      assumptions), user-editable: add, edit, delete (confirmed); migration
+      `20261025000000_usage_analytics` (one new table, `model_prices`, with CHECKs)
+- [x] Cost computed from real token counts only; unknown shown as unknown ("No price", "≥ $x",
+      never $0)
+- [x] Recharts views: usage over time, by project, by model, by source
+- [x] Unit tests for cost maths including price changes over time
+- [x] Validation gate passes
+
+Also delivered (from the Phase 7 request):
+
+- [x] Four kinds of number kept apart and labelled (ADR-019): recorded tokens (verified),
+      estimated API-equivalent cost, billed cost (not available, said so), and billing type per
+      tool (API key / subscription / not set) saying what an estimate means
+- [x] Usage by tool, model, project and session; input, output, reasoning, cache read and cache
+      write columns that add up to the total; per-tool notes on which counts it reports
+- [x] Daily, weekly and monthly trends over any range up to 3 years (presets 7/30/90 days and
+      12 months, or custom dates); days in the machine's time zone
+- [x] Monthly budgets for recorded tokens and estimated cost with a warning threshold;
+      month-to-date meters, marked "at least" when some usage is unpriced
+- [x] CSV export of the shown range
+- [x] Missing-data card: unpriced tokens and why, sessions with no project, sessions with
+      unread records, first recorded day, tools with no billing type, billed cost
+- [x] Pages: `/analytics` (overview, budget, trends, by tool/model/project/session, missing
+      data) and `/analytics/settings` (billing, budgets, prices, recorded models with no price)
+- [x] Unit tests (aggregation, date ranges and periods, time zones, budgets, validation, CSV
+      escaping, service rules); e2e (`analytics.spec.ts`) and axe on both pages in both themes
+
+Notes:
+
+- Recharts 3.8.0 added through shadcn's `chart` component (`pnpm dlx shadcn@4.22.1 add
+chart`; its prompt to overwrite `card.tsx` was declined). The request asked for Recharts.
+- Chart colours: the dark theme's `--chart-1` (L 0.68 → 0.66) and `--chart-4` (0.6 → 0.55,
+  chroma 0.17) were adjusted so the two tool colours pass a colour-blind separation check
+  (deutan ΔE 11.1) and 3:1 contrast on the card; the light pair already passed. Nothing else
+  used these tokens.
+- The migration was generated with `--create-only` and renamed to `20261025000000_…`, because
+  the existing migrations are dated ahead of today and a current timestamp would have sorted
+  before them. Applied to the dev database with `pnpm db:migrate` (additive, no reset).
+- Real-data check against the dev database (read-only; a production build on port 3300, since
+  the running `pnpm dev` held a Prisma client from before the new table): for 1–22 Oct the page,
+  the CSV export and an independent SQL count all gave 552,774,017 tokens over 2,675 responses.
+  With no prices entered, every figure showed "No price" and the cost chart said there was
+  nothing to estimate. No prices or settings were written to the dev database.
+- **Restart `pnpm dev`** after pulling this: a dev server started before the migration keeps
+  its old Prisma client and shows _Data unavailable_ on the analytics pages.
+- Billed cost isn't read: the providers' cost APIs need organisation admin keys and new outbound
+  calls, and don't cover subscriptions (ADR-019).
+- Shortcuts:
+  - The usage query filters on the local day, so it can't use the `occurredAt` index; fine
+    for tens of thousands of records (comment in `server/db/usage.ts`).
+  - The session table shows the top 25 by tokens; the CSV has all of them.
+- Phase 10 must run the web container with the host's `TZ`, or analytics days become UTC days.
 
 ## Phase 8 — Activity timeline
 

@@ -67,12 +67,6 @@ export function getRepositories() {
   return listRepositories();
 }
 
-export async function getUsage(now = new Date()) {
-  return summarizeUsage(
-    await usageByModelSince(new Date(now.getTime() - USAGE_WINDOW_DAYS * DAY_MS)),
-  );
-}
-
 export function getActivity() {
   return listActivity(LIST_LIMIT);
 }

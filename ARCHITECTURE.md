@@ -227,24 +227,71 @@ apps/bridge (host)                                    apps/web
   subagent, fork), stored in `AgentSession.details` (JSON, validated on read). Codex sessions
   are always _unverified_ (ADR-018).
 
+### Usage analytics (Phase 7)
+
+```
+usage_records ─┐ server/db/usage.ts usageRowsBetween(from, to, timeZone)
+               │   one SQL GROUP BY (local day, session, model), sums as bigint
+model_prices ──┤ server/db/pricing.ts listPrices() (Decimal → number)
+settings ──────┘ "analytics.settings": billing type per tool, monthly budgets
+        ▼
+domain/analytics.ts + domain/pricing.ts (pure, unit-tested)
+  priceRows → summarize / analyzeUsage (by tool, model, project, session, trend)
+  budgetStatus, usageCsv, resolveAnalyticsQuery (range + period from the URL)
+        ▼
+/analytics (overview, charts, breakdowns, missing data), /analytics/settings (prices,
+billing, budgets), /analytics/export (CSV, same range)
+```
+
+- **Four kinds of number, never mixed** (ADR-019): _recorded tokens_ (verified, from session
+  files), _estimated API-equivalent cost_ (tokens × the user's price table; always labelled an
+  estimate), _billed cost_ (not available: no billing source is read; shown as "—"), and the
+  user's _billing type_ per tool (API key / subscription / not set), which says what the
+  estimate means. A subscription has no per-token charge, so its estimate is only what the
+  same usage would cost at API prices.
+- **Prices** are versions in `model_prices`: exact model id, first day it applies, USD per
+  million tokens for input and output, and optional cache read, cache write and reasoning
+  rates, plus a required source and optional assumptions. A version applies until the model's
+  next one. ADCC ships no prices. Cost is computed when a page is read and never stored
+  (ADR-008).
+- **Unknown stays unknown:** usage with no price on its day, or with tokens of a kind whose
+  rate is blank, has no estimate. Totals add only what could be estimated and carry the
+  unpriced token count, so a partly priced figure shows as "≥ $x" and a wholly unpriced one as
+  "No price", never $0. Budget meters say "at least" in that case.
+- **Days** are calendar days in the server's time zone (the user's machine), computed in SQL
+  with `AT TIME ZONE` and in JS with `Intl`. Ranges come from `?from=&to=&period=`; anything
+  invalid falls back to the last 30 days with a notice, ranges end today and are capped at
+  3 years. Weeks start on Monday. Periods before the first usage ever recorded are "no data",
+  not zero; later periods with no usage are a real zero.
+- **Missing data** is listed per range: unpriced tokens and why, sessions with no project,
+  sessions with unread records, the first recorded day, tools with no billing type, and billed
+  cost. Charts have a table view; the cost chart is replaced by a message when nothing is
+  priced, since an empty chart reads as $0.
+- **CSV:** one line per day, session and model, with the price version used and the estimate
+  (blank when unknown, with the reason). Text cells that a spreadsheet would run as a formula
+  are prefixed with `'`.
+- **Charts** are Recharts through shadcn's `chart` component, stacked by tool with
+  `--chart-1` / `--chart-4` (checked for colour-blind separation and contrast in both themes).
+
 ## Data model
 
 Defined in `apps/web/prisma/schema.prisma` (ADR-008).
 
-| Model                | Purpose                                      | Key constraints                                           |
-| -------------------- | -------------------------------------------- | --------------------------------------------------------- |
-| `Project`            | a piece of work; status; optional folder     | unique `slug`, unique `localPath`; delete only archived   |
-| `Repository`         | GitHub repo, optionally linked to a project  | unique `(owner, name)`, unique `githubId`; sync state     |
-| `GitHub*` (5 tables) | branches, commits, PRs, issues, runs cache   | PK `(repositoryId, natural key)`; cascade; state CHECKs   |
-| `Milestone`          | dated goal inside a project                  | unique `(projectId, title)`                               |
-| `Task`               | unit of work in a project, maybe a milestone | indexed `(projectId, status)`; optional `assignedAgent`   |
-| `TaskDependency`     | task waits on another task                   | PK `(taskId, dependsOnId)`; not self (CHECK); cascade     |
-| `TaskComment`        | comment on a task                            | non-blank body (CHECK); cascade with the task             |
-| `AgentSession`       | one Claude Code / Codex session file         | unique `(source, externalId)`; skipped-record count ≥ 0   |
-| `AgentEvent`         | one record from a session file               | unique `(sessionId, externalId)` → idempotent re-ingest   |
-| `UsageRecord`        | token counts for one event                   | one per event; all token counts ≥ 0 (CHECK); no cost col. |
-| `ActivityEvent`      | timeline entry from a real event             | unique `dedupeKey`; optional links to project/repo/task   |
-| `ApplicationSetting` | key → JSON value                             | value validated by a domain Zod schema before writing     |
+| Model                | Purpose                                      | Key constraints                                            |
+| -------------------- | -------------------------------------------- | ---------------------------------------------------------- |
+| `Project`            | a piece of work; status; optional folder     | unique `slug`, unique `localPath`; delete only archived    |
+| `Repository`         | GitHub repo, optionally linked to a project  | unique `(owner, name)`, unique `githubId`; sync state      |
+| `GitHub*` (5 tables) | branches, commits, PRs, issues, runs cache   | PK `(repositoryId, natural key)`; cascade; state CHECKs    |
+| `Milestone`          | dated goal inside a project                  | unique `(projectId, title)`                                |
+| `Task`               | unit of work in a project, maybe a milestone | indexed `(projectId, status)`; optional `assignedAgent`    |
+| `TaskDependency`     | task waits on another task                   | PK `(taskId, dependsOnId)`; not self (CHECK); cascade      |
+| `TaskComment`        | comment on a task                            | non-blank body (CHECK); cascade with the task              |
+| `AgentSession`       | one Claude Code / Codex session file         | unique `(source, externalId)`; skipped-record count ≥ 0    |
+| `AgentEvent`         | one record from a session file               | unique `(sessionId, externalId)` → idempotent re-ingest    |
+| `UsageRecord`        | token counts for one event                   | one per event; all token counts ≥ 0 (CHECK); no cost col.  |
+| `ActivityEvent`      | timeline entry from a real event             | unique `dedupeKey`; optional links to project/repo/task    |
+| `ModelPrice`         | one version of a model's price (Phase 7)     | unique `(model, effectiveFrom)`; rates ≥ 0, source (CHECK) |
+| `ApplicationSetting` | key → JSON value                             | value validated by a domain Zod schema before writing      |
 
 Token fields on `UsageRecord` are **disjoint**: input, output, reasoning, cache read and cache
 write never include each other, so their sum is the true total. Parsers must normalise to this
@@ -290,9 +337,9 @@ session.
 1. **Sessions/usage:** session file → bridge parser (Zod-validated, tolerant of unknown
    records) → `POST /api/bridge/ingest` → upsert keyed by source + session id + record id, so
    re-ingesting the same file is idempotent.
-2. **Costs:** computed in the web app from stored token counts × a versioned price table
-   (per model, with effective dates). Records without token counts have no cost — never an
-   estimate.
+2. **Costs:** estimated in the web app from stored token counts × the user's versioned price
+   table (per model, with effective dates), when a page is read. Usage without a price has no
+   estimate, never $0. Billed cost isn't read from anywhere (ADR-019).
 3. **Timeline:** derived from stored events (sessions, commits/PRs from GitHub, task changes,
    action runs). Never synthesised.
 4. **Orchestration:** agent or user proposes an action → stored as `pending` → user approves
@@ -638,3 +685,40 @@ Add new ADRs at the end. Never rewrite an accepted one — supersede it with a n
   all 77 rollouts on this machine: 0 unrecognised records, and parsed usage matched an
   independent count from the raw files (2,473 responses). Live status for Codex stays
   unavailable until Codex documents an interface for it.
+
+### ADR-019: Usage costs are user-priced estimates; billed cost is not read
+
+- **Status:** Accepted (Phase 7)
+- **Context:** Phase 7 adds usage analytics with costs and budgets, and must keep apart
+  verified token usage, estimated API-equivalent cost, actually billed cost, and subscription
+  usage with no per-token charge, never presenting an estimate as a charge or hardcoding
+  unverified prices. The token counts are verified (ADR-017, ADR-018), but nothing ADCC reads
+  carries a price or a charge. Claude Code and Codex can run on a subscription or an API key,
+  and neither's session files say which. Provider billing data exists only behind
+  organisation admin APIs (Anthropic's Admin API cost report, OpenAI's organisation costs),
+  which need an admin key and outbound calls, and say nothing about subscription plans.
+- **Decision:**
+  - Prices are user-entered versions in `model_prices`: exact model id, effective-from day,
+    USD per million tokens. Input and output are required; cache read, cache write and
+    reasoning are optional, and a blank rate means unknown. Every version needs a source;
+    assumptions are optional. ADCC ships, fetches and guesses no prices.
+  - Cost is estimated when read (never stored, ADR-008): each kind of token × its rate in the
+    version in force on the usage's day. No version, or tokens of a kind without a rate, means
+    no estimate. Sums carry the unpriced token count, so a total is shown as a lower bound
+    ("≥") or "No price", never as $0, and every cost label says "estimated API-equivalent".
+  - Billed cost isn't obtained. Connecting admin billing APIs would add an organisation admin
+    credential and new outbound calls, and still wouldn't cover subscriptions. The UI says
+    billed cost is not available instead.
+  - The user states each tool's billing type (API key / subscription / not set) and monthly
+    budgets (tokens and/or estimated cost, with a warning percentage) in one
+    `application_settings` row, `analytics.settings`, validated on write and on read. Budgets
+    compare month to date.
+  - Days, weeks (from Monday) and months are calendar periods in the server's time zone,
+    which is the user's own machine. Price effective dates are days in the same zone.
+  - Price changes write `pricing.*` activity events in the same transaction.
+- **Consequences:** Nothing is estimated until the user adds prices; the settings page lists
+  recorded models with none. Model ids must match exactly, so a new model version is unpriced
+  until added, which is visible rather than wrong. Discounts, batch rates, regional pricing,
+  long-context tiers, cache-write durations, taxes and credits aren't modelled; that goes in a
+  price's assumptions. When the web app moves into a container (Phase 10) it must run with the
+  host's `TZ`, or days will be UTC days.
